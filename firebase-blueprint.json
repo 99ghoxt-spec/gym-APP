@@ -1,0 +1,40 @@
+{
+  "entities": {
+    "Workout": {
+      "title": "Workout Session",
+      "description": "A single fitness training session.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "The UID of the user." },
+        "date": { "type": "string", "format": "date-time", "description": "When the workout occurred." },
+        "bodyPart": { "type": "string", "description": "The primary muscle group targeted." },
+        "totalCalories": { "type": "number", "description": "Total calories burned in this session." },
+        "status": { "type": "string", "enum": ["active", "completed"], "description": "Current status of the workout." }
+      },
+      "required": ["userId", "date", "bodyPart"]
+    },
+    "Exercise": {
+      "title": "Exercise Log",
+      "description": "A specific exercise performed during a workout.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Name of the exercise." },
+        "sets": { "type": "integer", "description": "Number of sets performed." },
+        "reps": { "type": "integer", "description": "Number of repetitions per set." },
+        "weight": { "type": "number", "description": "Weight used in kg/lbs." },
+        "calories": { "type": "number", "description": "Calories burned for this specific exercise." }
+      },
+      "required": ["name", "sets", "reps"]
+    }
+  },
+  "firestore": {
+    "/workouts/{workoutId}": {
+      "schema": "Workout",
+      "description": "Collection of workout sessions."
+    },
+    "/workouts/{workoutId}/exercises/{exerciseId}": {
+      "schema": "Exercise",
+      "description": "Sub-collection of exercises for a specific workout."
+    }
+  }
+}

@@ -1,0 +1,79 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    // Collection: workouts
+    // Fields:
+    //   - userId: string (required)
+    //   - date: string (required, ISO 8601)
+    //   - bodyPart: string (required)
+    //   - totalCalories: number
+    //   - status: string (enum: active, completed)
+    //
+    // Sub-collection: exercises
+    // Fields:
+    //   - name: string (required)
+    //   - sets: int (required)
+    //   - reps: int (required)
+    //   - weight: number
+    //   - calories: number
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isWorkoutOwner(workoutId) {
+      return isAuthenticated() && request.auth.uid == get(/databases/$(database)/documents/workouts/$(workoutId)).data.userId;
+    }
+
+    function isValidWorkout(data) {
+      return data.userId is string &&
+             data.date is timestamp &&
+             data.bodyPart is string &&
+             (data.totalCalories == null || data.totalCalories is number) &&
+             (data.status == null || data.status in ['active', 'completed']);
+    }
+
+    function isValidExercise(data) {
+      return data.name is string && data.name.size() > 0 &&
+             (data.sets is number || data.sets is list) &&
+             (!('reps' in data) || data.reps is number) &&
+             (!('weight' in data) || data.weight is number) &&
+             (data.calories == null || data.calories is number);
+    }
+
+    match /workouts/{workoutId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid && isValidWorkout(request.resource.data);
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && isValidWorkout(request.resource.data);
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+
+      match /exercises/{exerciseId} {
+        allow read: if isWorkoutOwner(workoutId);
+        allow create: if isWorkoutOwner(workoutId) && isValidExercise(request.resource.data);
+        allow update: if isWorkoutOwner(workoutId) && isValidExercise(request.resource.data);
+        allow delete: if isWorkoutOwner(workoutId);
+      }
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow write: if isOwner(userId);
+    }
+
+    match /metrics/{metricId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid && request.resource.data.weight is number && request.resource.data.height is number;
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.weight is number && request.resource.data.height is number;
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+  }
+}
