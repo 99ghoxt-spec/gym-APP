@@ -356,6 +356,7 @@ export default function AppWrapper() {
 function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loginError, setLoginError] = useState<string | null>(null);
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [showNewWorkoutModal, setShowNewWorkoutModal] = useState(false);
@@ -374,6 +375,16 @@ function App() {
     const timer = setInterval(() => setToday(new Date()), 60000);
     return () => clearInterval(timer);
   }, []);
+
+  const handleLogin = async () => {
+    setLoginError(null);
+    try {
+      await signIn();
+    } catch (error: any) {
+      console.error("Login Error:", error);
+      setLoginError(error.message || "登录失败，请重试");
+    }
+  };
 
   const activeWorkout = useMemo(() => {
     return workouts.find(w => {
@@ -415,6 +426,8 @@ function App() {
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Workout));
       setWorkouts(data);
+    }, (error) => {
+      handleFirestoreError(error, 'list', 'workouts');
     });
     return unsubscribe;
   }, [user]);
@@ -429,6 +442,8 @@ function App() {
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setMetrics(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Metric)));
+    }, (error) => {
+      handleFirestoreError(error, 'list', 'metrics');
     });
     return unsubscribe;
   }, [user]);
@@ -442,6 +457,8 @@ function App() {
     const q = query(collection(db, `workouts/${activeWorkout.id}/exercises`));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setExercises(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Exercise)));
+    }, (error) => {
+      handleFirestoreError(error, 'list', `workouts/${activeWorkout.id}/exercises`);
     });
     return unsubscribe;
   }, [activeWorkout]);
@@ -684,12 +701,19 @@ function App() {
           <p className={cn("mb-10 text-sm", theme === 'nature' ? "text-[#2A6041]/70" : "text-zinc-500")}>
             记录每一次蜕变，保持自律与专注。
           </p>
-          <Button onClick={signIn} className="w-full py-3.5 text-base">
+          <Button onClick={handleLogin} className="w-full py-3.5 text-base">
             <span className="flex items-center justify-center gap-2">
               <LogIn className="w-5 h-5" />
               登录并开始
             </span>
           </Button>
+          {loginError && (
+            <p className="mt-4 text-xs text-red-500 bg-red-50 p-2 rounded-lg border border-red-100">
+              {loginError}
+              <br />
+              <span className="text-zinc-500 mt-1 block">提示：请确保浏览器没有拦截弹窗，或尝试在新标签页中打开应用。</span>
+            </p>
+          )}
         </motion.div>
       </div>
     );
