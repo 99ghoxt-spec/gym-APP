@@ -31,12 +31,14 @@ service cloud.firestore {
     }
 
     function isWorkoutOwner(workoutId) {
-      return isAuthenticated() && request.auth.uid == get(/databases/$(database)/documents/workouts/$(workoutId)).data.userId;
+      return isAuthenticated() && 
+             exists(/databases/$(database)/documents/workouts/$(workoutId)) &&
+             get(/databases/$(database)/documents/workouts/$(workoutId)).data.userId == request.auth.uid;
     }
 
     function isValidWorkout(data) {
       return data.userId is string &&
-             data.date is timestamp &&
+             (data.date is timestamp || data.date is string) &&
              data.bodyPart is string &&
              (data.totalCalories == null || data.totalCalories is number) &&
              (data.status == null || data.status in ['active', 'completed']);
@@ -47,20 +49,21 @@ service cloud.firestore {
              (data.sets is number || data.sets is list) &&
              (!('reps' in data) || data.reps is number) &&
              (!('weight' in data) || data.weight is number) &&
-             (data.calories == null || data.calories is number);
+             (!('calories' in data) || data.calories == null || data.calories is number);
     }
 
     match /workouts/{workoutId} {
-      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow get: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid);
+      allow list: if isAuthenticated() && resource.data.userId == request.auth.uid;
       allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid && isValidWorkout(request.resource.data);
       allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && isValidWorkout(request.resource.data);
       allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
 
       match /exercises/{exerciseId} {
-        allow read: if isWorkoutOwner(workoutId);
-        allow create: if isWorkoutOwner(workoutId) && isValidExercise(request.resource.data);
-        allow update: if isWorkoutOwner(workoutId) && isValidExercise(request.resource.data);
-        allow delete: if isWorkoutOwner(workoutId);
+        allow read: if isAuthenticated() && get(/databases/$(database)/documents/workouts/$(workoutId)).data.userId == request.auth.uid;
+        allow create: if isAuthenticated() && get(/databases/$(database)/documents/workouts/$(workoutId)).data.userId == request.auth.uid && isValidExercise(request.resource.data);
+        allow update: if isAuthenticated() && get(/databases/$(database)/documents/workouts/$(workoutId)).data.userId == request.auth.uid && isValidExercise(request.resource.data);
+        allow delete: if isAuthenticated() && get(/databases/$(database)/documents/workouts/$(workoutId)).data.userId == request.auth.uid;
       }
     }
 

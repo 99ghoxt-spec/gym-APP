@@ -36,7 +36,15 @@ import {
   getDocs
 } from 'firebase/firestore';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { auth, db, signIn, logOut } from './firebase';
+import { 
+  auth, 
+  db, 
+  signIn, 
+  logOut,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  updateProfile
+} from './firebase';
 import { getDocFromServer } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -109,7 +117,7 @@ const COMMON_EXERCISES = [
 
 // --- Components ---
 
-const WorkoutHistoryItem = ({ workout, onDelete }: { key?: string | number, workout: Workout, onDelete: (id: string) => Promise<void> }) => {
+const WorkoutHistoryItem = ({ workout, onDelete, onDeleteExercise }: { key?: string | number, workout: Workout, onDelete: (id: string) => Promise<void>, onDeleteExercise: (workoutId: string, exerciseId: string, calories: number) => Promise<void> }) => {
   const [expanded, setExpanded] = useState(false);
   const [historyExercises, setHistoryExercises] = useState<Exercise[]>([]);
   const [loading, setLoading] = useState(false);
@@ -131,6 +139,11 @@ const WorkoutHistoryItem = ({ workout, onDelete }: { key?: string | number, work
     setExpanded(!expanded);
   };
 
+  const handleDeleteEx = async (exId: string, calories: number) => {
+    await onDeleteExercise(workout.id, exId, calories);
+    setHistoryExercises(prev => prev.filter(e => e.id !== exId));
+  };
+
   return (
     <div className={cn("group flex flex-col p-4 rounded-2xl transition-all", theme === 'nature' ? "bg-white shadow-sm" : "bg-zinc-50 border border-zinc-100 hover:border-zinc-300")}>
       <div className="flex items-center justify-between cursor-pointer" onClick={toggleExpand}>
@@ -149,7 +162,7 @@ const WorkoutHistoryItem = ({ workout, onDelete }: { key?: string | number, work
         <div className="flex items-center gap-2">
           <button 
             onClick={(e) => { e.stopPropagation(); onDelete(workout.id); }}
-            className={cn("opacity-0 group-hover:opacity-100 p-2 rounded-lg transition-all", theme === 'nature' ? "text-red-400 hover:text-red-600 hover:bg-red-50" : "text-zinc-400 hover:text-red-500 hover:bg-red-50")}
+            className={cn("p-2 rounded-lg transition-all", theme === 'nature' ? "text-red-400 hover:text-red-600 hover:bg-red-50" : "text-zinc-400 hover:text-red-500 hover:bg-red-50")}
           >
             <Trash2 className="w-4 h-4" />
           </button>
@@ -164,8 +177,16 @@ const WorkoutHistoryItem = ({ workout, onDelete }: { key?: string | number, work
           ) : historyExercises.length > 0 ? (
             <div className="space-y-3">
               {historyExercises.map(ex => (
-                <div key={ex.id} className={cn("p-3 rounded-xl", theme === 'nature' ? "bg-[#F4F7F4]" : "bg-white border border-zinc-100")}>
-                  <div className={cn("text-sm font-medium mb-2", theme === 'nature' ? "text-[#2A6041]" : "text-zinc-900")}>{ex.name}</div>
+                <div key={ex.id} className={cn("p-3 rounded-xl group/ex", theme === 'nature' ? "bg-[#F4F7F4]" : "bg-white border border-zinc-100")}>
+                  <div className="flex justify-between items-start mb-2">
+                    <div className={cn("text-sm font-medium", theme === 'nature' ? "text-[#2A6041]" : "text-zinc-900")}>{ex.name}</div>
+                    <button 
+                      onClick={() => handleDeleteEx(ex.id, ex.calories || 0)}
+                      className={cn("opacity-0 group-hover/ex:opacity-100 p-1 rounded-md transition-all", theme === 'nature' ? "text-red-400 hover:bg-red-50" : "text-zinc-400 hover:text-red-500 hover:bg-red-50")}
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                     {Array.isArray(ex.sets) ? ex.sets.map((set, i) => (
                       <div key={i} className={cn("text-xs px-2 py-1.5 rounded-lg", theme === 'nature' ? "bg-white text-[#2A6041]/80" : "bg-zinc-50 text-zinc-600 border border-zinc-100")}>
@@ -357,7 +378,37 @@ function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [loginError, setLoginError] = useState<string | null>(null);
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [displayName, setDisplayName] = useState('');
   const [workouts, setWorkouts] = useState<Workout[]>([]);
+
+  const handleEmailAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError(null);
+    try {
+      if (authMode === 'signup') {
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        if (displayName) {
+          await updateProfile(userCredential.user, { displayName });
+        }
+      } else {
+        await signInWithEmailAndPassword(auth, email, password);
+      }
+    } catch (error: any) {
+      console.error("Auth Error:", error);
+      let msg = `认证失败: ${error.message}`;
+      if (error.code === 'auth/email-already-in-use') msg = "该邮箱已被注册";
+      if (error.code === 'auth/invalid-email') msg = "邮箱格式不正确";
+      if (error.code === 'auth/weak-password') msg = "密码太弱（至少6位）";
+      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') msg = "邮箱或密码错误";
+      if (error.code === 'auth/operation-not-allowed') {
+        msg = "⚠️ 邮箱登录功能未生效。请检查：\n1. 是否在控制台开启了 'Email/Password' (不是 Email link)\n2. 是否点击了右下角的 'Save' 按钮\n3. 确认项目 ID 是否为 " + auth.app.options.projectId;
+      }
+      setLoginError(msg);
+    }
+  };
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [showNewWorkoutModal, setShowNewWorkoutModal] = useState(false);
   const [newWorkoutPart, setNewWorkoutPart] = useState(BODY_PARTS[0]);
@@ -389,7 +440,7 @@ function App() {
   const activeWorkout = useMemo(() => {
     return workouts.find(w => {
       const wDate = w.date?.toDate ? w.date.toDate() : new Date(w.date);
-      return isSameDay(wDate, today);
+      return isSameDay(wDate, today) && w.status === 'active';
     }) || null;
   }, [workouts, today]);
 
@@ -476,8 +527,38 @@ function App() {
         status: 'active'
       });
       setShowNewWorkoutModal(false);
+      setActiveTab('dashboard');
     } catch (err) {
       handleFirestoreError(err, 'create', 'workouts');
+    }
+  };
+
+  const handleEndWorkout = async () => {
+    if (!activeWorkout) return;
+    try {
+      await updateDoc(doc(db, 'workouts', activeWorkout.id), {
+        status: 'completed'
+      });
+    } catch (err) {
+      handleFirestoreError(err, 'update', `workouts/${activeWorkout.id}`);
+    }
+  };
+
+  const handleDeleteExercise = async (exerciseId: string) => {
+    if (!activeWorkout) return;
+    try {
+      const exToDelete = exercises.find(e => e.id === exerciseId);
+      if (!exToDelete) return;
+      
+      await deleteDoc(doc(db, `workouts/${activeWorkout.id}/exercises`, exerciseId));
+      
+      // Update total calories
+      const newTotal = Math.max(0, activeWorkout.totalCalories - (exToDelete.calories || 0));
+      await updateDoc(doc(db, 'workouts', activeWorkout.id), {
+        totalCalories: newTotal
+      });
+    } catch (err) {
+      handleFirestoreError(err, 'delete', `workouts/${activeWorkout.id}/exercises/${exerciseId}`);
     }
   };
 
@@ -552,6 +633,21 @@ function App() {
       await deleteDoc(doc(db, 'workouts', id));
     } catch (err) {
       handleFirestoreError(err, 'delete', `workouts/${id}`);
+    }
+  };
+
+  const handleDeleteHistoryExercise = async (workoutId: string, exerciseId: string, calories: number) => {
+    try {
+      await deleteDoc(doc(db, `workouts/${workoutId}/exercises`, exerciseId));
+      const workout = workouts.find(w => w.id === workoutId);
+      if (workout) {
+        const newTotal = Math.max(0, workout.totalCalories - calories);
+        await updateDoc(doc(db, 'workouts', workoutId), {
+          totalCalories: newTotal
+        });
+      }
+    } catch (err) {
+      handleFirestoreError(err, 'delete', `workouts/${workoutId}/exercises/${exerciseId}`);
     }
   };
 
@@ -698,22 +794,83 @@ function App() {
           <h1 className={cn("text-3xl font-semibold mb-3", theme === 'nature' ? "text-[#2A6041]" : "text-zinc-900")}>
             极简健身
           </h1>
-          <p className={cn("mb-10 text-sm", theme === 'nature' ? "text-[#2A6041]/70" : "text-zinc-500")}>
+          <p className={cn("mb-8 text-sm", theme === 'nature' ? "text-[#2A6041]/70" : "text-zinc-500")}>
             记录每一次蜕变，保持自律与专注。
           </p>
-          <Button onClick={handleLogin} className="w-full py-3.5 text-base">
-            <span className="flex items-center justify-center gap-2">
-              <LogIn className="w-5 h-5" />
-              登录并开始
-            </span>
-          </Button>
+
+          <div className="flex flex-col gap-4 mb-8">
+            <Button onClick={handleLogin} className="w-full py-3.5 text-base">
+              <span className="flex items-center justify-center gap-2">
+                <LogIn className="w-5 h-5" />
+                Google 登录 (推荐)
+              </span>
+            </Button>
+            <p className="text-[10px] text-zinc-400">提示：Google 登录可能需要 VPN 环境</p>
+          </div>
+
+          <div className="relative mb-8">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t border-zinc-100"></span>
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-white px-2 text-zinc-400">或者使用邮箱</span>
+            </div>
+          </div>
+
+          <form onSubmit={handleEmailAuth} className="space-y-4 text-left">
+            {authMode === 'signup' && (
+              <div>
+                <label className="block text-xs font-medium text-zinc-500 mb-1 ml-1">昵称</label>
+                <input 
+                  type="text" 
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-[#A3C87A] transition-all text-sm"
+                  placeholder="您的称呼"
+                  required
+                />
+              </div>
+            )}
+            <div>
+              <label className="block text-xs font-medium text-zinc-500 mb-1 ml-1">邮箱</label>
+              <input 
+                type="email" 
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-[#A3C87A] transition-all text-sm"
+                placeholder="example@email.com"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-zinc-500 mb-1 ml-1">密码</label>
+              <input 
+                type="password" 
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-[#A3C87A] transition-all text-sm"
+                placeholder="••••••••"
+                required
+              />
+            </div>
+            <Button type="submit" variant="secondary" className="w-full py-3 text-sm">
+              {authMode === 'login' ? '邮箱登录' : '注册账号'}
+            </Button>
+            <button 
+              type="button"
+              onClick={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')}
+              className="w-full text-center text-xs text-zinc-500 hover:text-zinc-800 transition-colors mt-2"
+            >
+              {authMode === 'login' ? '没有账号？立即注册' : '已有账号？返回登录'}
+            </button>
+          </form>
+
           {loginError && (
             <p className="mt-4 text-xs text-red-500 bg-red-50 p-2 rounded-lg border border-red-100">
               {loginError}
-              <br />
-              <span className="text-zinc-500 mt-1 block">提示：请确保浏览器没有拦截弹窗，或尝试在新标签页中打开应用。</span>
             </p>
           )}
+
         </motion.div>
       </div>
     );
@@ -876,9 +1033,17 @@ function App() {
                     </div>
                     <h2 className={cn("text-2xl font-semibold", theme === 'nature' ? "text-[#2A6041]" : "text-zinc-900")}>{activeWorkout.bodyPart}</h2>
                   </div>
-                  <div className="text-right">
-                    <span className={cn("text-xs font-medium block mb-0.5", theme === 'nature' ? "text-[#2A6041]/70" : "text-zinc-500")}>消耗热量</span>
-                    <span className={cn("text-xl font-semibold", theme === 'nature' ? "text-[#A3C87A]" : "text-orange-500")}>{activeWorkout.totalCalories}</span>
+                  <div className="text-right flex flex-col items-end gap-2">
+                    <div>
+                      <span className={cn("text-xs font-medium block mb-0.5", theme === 'nature' ? "text-[#2A6041]/70" : "text-zinc-500")}>消耗热量</span>
+                      <span className={cn("text-xl font-semibold", theme === 'nature' ? "text-[#A3C87A]" : "text-orange-500")}>{activeWorkout.totalCalories}</span>
+                    </div>
+                    <button 
+                      onClick={handleEndWorkout}
+                      className={cn("text-[10px] px-2 py-1 rounded-lg border transition-all", theme === 'nature' ? "bg-[#F4F7F4] text-[#2A6041] border-[#2A6041]/10 hover:bg-[#E2EBE2]" : "bg-zinc-50 text-zinc-600 border-zinc-200 hover:bg-zinc-100")}
+                    >
+                      结束训练
+                    </button>
                   </div>
                 </div>
 
@@ -892,7 +1057,7 @@ function App() {
                     <Input label="重量 (kg)" name="weight" type="number" step="0.5" required />
                     <Input label="次数" name="reps" type="number" required />
                   </div>
-                  <Button className="w-full py-3">
+                  <Button type="submit" className="w-full py-3">
                     <span className="flex items-center justify-center gap-2">
                       <Plus className="w-4 h-4" />
                       记录本组
@@ -919,7 +1084,15 @@ function App() {
                           )}
                         </div>
                       </div>
-                      <div className={cn("text-sm font-semibold ml-3", theme === 'nature' ? "text-[#A3C87A]" : "text-orange-500")}>+{ex.calories}</div>
+                      <div className="flex items-center gap-3">
+                        <div className={cn("text-sm font-semibold", theme === 'nature' ? "text-[#A3C87A]" : "text-orange-500")}>+{ex.calories}</div>
+                        <button 
+                          onClick={() => handleDeleteExercise(ex.id)}
+                          className={cn("p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-all", theme === 'nature' ? "text-red-400 hover:bg-red-50" : "text-zinc-400 hover:text-red-500 hover:bg-red-50")}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1010,7 +1183,12 @@ function App() {
               {completedWorkouts
                 .filter(w => historyFilter === 'all' || w.bodyPart === selectedBodyPart)
                 .map((workout) => (
-                  <WorkoutHistoryItem key={workout.id} workout={workout} onDelete={handleDeleteWorkout} />
+                  <WorkoutHistoryItem 
+                    key={workout.id} 
+                    workout={workout} 
+                    onDelete={handleDeleteWorkout} 
+                    onDeleteExercise={handleDeleteHistoryExercise}
+                  />
                 ))}
               {completedWorkouts.filter(w => historyFilter === 'all' || w.bodyPart === selectedBodyPart).length === 0 && (
                 <div className="text-center py-12 text-zinc-400 text-sm">
